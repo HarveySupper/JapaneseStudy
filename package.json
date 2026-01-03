@@ -1,0 +1,25 @@
+{
+  "name": "JapaneseStudy",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@nuxt/icon": "^2.1.1",
+    "@nuxt/ui": "^4.3.0",
+    "@nuxtjs/supabase": "^2.0.3",
+    "@vite-pwa/nuxt": "^1.1.0",
+    "nuxt": "^4.2.2",
+    "vue": "^3.5.26",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "playwright": "^1.57.0"
+  }
+}
