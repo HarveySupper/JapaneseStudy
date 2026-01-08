@@ -544,17 +544,19 @@ onMounted(async () => {
             </div>
 
             <div class="p-6 text-center">
-              <!-- 日文单词（汉字/假名） -->
+              <!-- 假名（五十音） -->
               <h2 class="text-5xl font-bold text-gray-900 dark:text-white mb-3">
-                {{ currentQuizWord.kanji }}
+                {{ currentQuizWord.hiragana }}
               </h2>
 
-              <!-- 假名 -->
-              <p class="text-2xl text-purple-500 mb-4">
-                {{ currentQuizWord.hiragana }}
-                <span v-if="currentQuizWord.katakana" class="text-gray-400 text-lg ml-2">
-                  ({{ currentQuizWord.katakana }})
-                </span>
+              <!-- 片假名 -->
+              <p v-if="currentQuizWord.katakana && currentQuizWord.katakana !== currentQuizWord.hiragana" class="text-2xl text-purple-500 mb-2">
+                {{ currentQuizWord.katakana }}
+              </p>
+
+              <!-- 罗马音 -->
+              <p v-if="currentQuizWord.romaji" class="text-lg text-gray-400 mb-4">
+                {{ currentQuizWord.romaji }}
               </p>
 
               <!-- 发音按钮 -->
