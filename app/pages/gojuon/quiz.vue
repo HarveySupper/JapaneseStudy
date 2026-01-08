@@ -766,7 +766,7 @@ const randomProgress = computed(() => {
           <div class="space-y-3">
             <button
               class="w-full py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all"
-              @click="startQuiz(quizMode)"
+              @click="startQuiz(quizMode, orderMode)"
             >
               再来一次
             </button>

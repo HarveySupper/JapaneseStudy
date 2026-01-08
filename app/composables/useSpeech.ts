@@ -143,6 +143,12 @@ export function useSpeech() {
     window.speechSynthesis.getVoices()
   }
 
+  // 检查是否支持语音合成
+  const isSupported = computed(() => {
+    if (typeof window === 'undefined') return false
+    return 'speechSynthesis' in window
+  })
+
   // 组件挂载时预加载
   onMounted(() => {
     loadSavedVoice()
@@ -163,6 +169,7 @@ export function useSpeech() {
     speakWord,
     preload,
     isSpeaking: readonly(isSpeaking),
+    isSupported: readonly(isSupported),
     // 语音选择相关
     availableVoices: readonly(availableVoices),
     selectedVoiceName: readonly(selectedVoiceName),

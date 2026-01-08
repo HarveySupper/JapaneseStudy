@@ -86,12 +86,22 @@ const displayMode = ref<'hiragana' | 'katakana' | 'both'>('both')
 // 当前播放的字符
 const playingChar = ref('')
 
-// 使用全局语音 composable
-const { speak: speechSpeak } = useSpeech()
+// 序列播放状态
+const isPlayingSequence = ref(false)
+const playingSequenceType = ref<'row' | 'column' | null>(null)
+const playingSequenceIndex = ref(-1)
 
-// 播放发音
+// 使用全局语音 composable
+const { speak: speechSpeak, stop: speechStop } = useSpeech()
+
+// 播放发音（单个字符）
 const speak = (char: { hiragana: string; katakana: string; romaji: string }) => {
   if (!char.hiragana) return
+
+  // 如果正在播放序列，先停止
+  if (isPlayingSequence.value) {
+    stopSequence()
+  }
 
   playingChar.value = char.hiragana
   speechSpeak(char.hiragana, { rate: 0.8 })
@@ -100,6 +110,103 @@ const speak = (char: { hiragana: string; katakana: string; romaji: string }) => 
   setTimeout(() => {
     playingChar.value = ''
   }, 800)
+}
+
+// 停止序列播放
+const stopSequence = () => {
+  isPlayingSequence.value = false
+  playingSequenceType.value = null
+  playingSequenceIndex.value = -1
+  playingChar.value = ''
+  speechStop()
+}
+
+// 顺序播放多个字符（连读模式）
+const speakSequence = async (
+  chars: Array<{ hiragana: string; katakana: string; romaji: string }>,
+  type: 'row' | 'column',
+  index: number
+) => {
+  // 过滤空字符
+  const validChars = chars.filter(c => c.hiragana)
+  if (validChars.length === 0) return
+
+  // 如果正在播放，先停止
+  if (isPlayingSequence.value) {
+    stopSequence()
+    await new Promise(r => setTimeout(r, 100))
+  }
+
+  // 设置播放状态
+  isPlayingSequence.value = true
+  playingSequenceType.value = type
+  playingSequenceIndex.value = index
+
+  // 将所有假名连成一个字符串，用空格分隔以获得自然的朗读节奏
+  const textToSpeak = validChars.map(c => c.hiragana).join(' ')
+
+  // 高亮所有要播放的字符
+  const allHiragana = validChars.map(c => c.hiragana)
+
+  // 使用 Promise 等待语音播放完成
+  await new Promise<void>((resolve) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      resolve()
+      return
+    }
+
+    window.speechSynthesis.cancel()
+
+    const utterance = new SpeechSynthesisUtterance(textToSpeak)
+    utterance.lang = 'ja-JP'
+    utterance.rate = 0.9 // 稍快一点，更自然
+
+    // 通过 boundary 事件跟踪当前读到哪个字符
+    let charIndex = 0
+    utterance.onboundary = (event) => {
+      if (event.name === 'word' && charIndex < allHiragana.length) {
+        playingChar.value = allHiragana[charIndex] || ''
+        charIndex++
+      }
+    }
+
+    utterance.onstart = () => {
+      // 开始时高亮第一个字符
+      playingChar.value = allHiragana[0] || ''
+    }
+
+    utterance.onend = () => {
+      playingChar.value = ''
+      resolve()
+    }
+
+    utterance.onerror = () => {
+      playingChar.value = ''
+      resolve()
+    }
+
+    window.speechSynthesis.speak(utterance)
+  })
+
+  // 播放完成，重置状态
+  if (isPlayingSequence.value) {
+    stopSequence()
+  }
+}
+
+// 播放整行
+const playRow = (rowIndex: number) => {
+  const row = gojuonData[rowIndex]
+  if (!row) return
+  speakSequence(row.chars, 'row', rowIndex)
+}
+
+// 播放整列
+const playColumn = (columnIndex: number) => {
+  const chars = gojuonData
+    .map(row => row.chars[columnIndex])
+    .filter((char): char is { hiragana: string; katakana: string; romaji: string } => !!char)
+  speakSequence(chars, 'column', columnIndex)
 }
 
 // 列标题
@@ -190,26 +297,50 @@ const columnHeaders = ['a', 'i', 'u', 'e', 'o']
       <!-- 列标题 -->
       <div class="grid grid-cols-6 gap-2 mb-2">
         <div class="text-center text-sm text-gray-400"></div>
-        <div
-          v-for="header in columnHeaders"
+        <button
+          v-for="(header, colIndex) in columnHeaders"
           :key="header"
-          class="text-center text-sm font-medium text-gray-500 dark:text-gray-400"
+          class="flex items-center justify-center gap-1 text-sm font-medium rounded-lg py-1 transition-all duration-200"
+          :class="[
+            playingSequenceType === 'column' && playingSequenceIndex === colIndex
+              ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 ring-2 ring-rose-400'
+              : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-rose-500'
+          ]"
+          @click="playColumn(colIndex)"
         >
+          <UIcon
+            name="i-heroicons-play-circle"
+            class="w-3.5 h-3.5"
+            :class="playingSequenceType === 'column' && playingSequenceIndex === colIndex ? 'animate-pulse' : ''"
+          />
           {{ header }}
-        </div>
+        </button>
       </div>
 
       <!-- 50音行 -->
       <div class="space-y-2">
         <div
-          v-for="row in gojuonData"
+          v-for="(row, rowIndex) in gojuonData"
           :key="row.row"
           class="grid grid-cols-6 gap-2"
         >
-          <!-- 行标题 -->
-          <div class="flex items-center justify-center text-sm font-medium text-gray-500 dark:text-gray-400">
+          <!-- 行标题（可点击播放整行） -->
+          <button
+            class="flex items-center justify-center gap-0.5 text-sm font-medium rounded-lg py-1 transition-all duration-200"
+            :class="[
+              playingSequenceType === 'row' && playingSequenceIndex === rowIndex
+                ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 ring-2 ring-rose-400'
+                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-rose-500'
+            ]"
+            @click="playRow(rowIndex)"
+          >
+            <UIcon
+              name="i-heroicons-play-circle"
+              class="w-3 h-3"
+              :class="playingSequenceType === 'row' && playingSequenceIndex === rowIndex ? 'animate-pulse' : ''"
+            />
             {{ row.row }}
-          </div>
+          </button>
 
           <!-- 字符卡片 -->
           <button
