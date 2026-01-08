@@ -76,6 +76,9 @@ const isActive = (path: string) => {
       </main>
     </div>
 
+    <!-- PWA 安装提示 -->
+    <PWAInstallPrompt />
+
     <!-- 移动端布局 -->
     <div class="md:hidden min-h-screen">
       <!-- 主内容区域 - 移动端 -->
