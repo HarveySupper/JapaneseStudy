@@ -15,6 +15,7 @@ const words = ref<any[]>([])
 const currentIndex = ref(0)
 const showMeaning = ref(false)
 const showExample = ref(false)
+const showRomaji = ref(false) // 罗马音默认隐藏
 const isLoading = ref(true)
 const isCompleted = ref(false)
 const isSyncing = ref(false) // 是否正在同步单词
@@ -28,6 +29,7 @@ const quizSubmitted = ref(false) // 是否已提交当前题目
 const quizCorrect = ref(false) // 当前题目是否正确
 const quizScore = ref({ correct: 0, wrong: 0 }) // 测验得分
 const quizFinished = ref(false) // 测验是否结束
+const showQuizRomaji = ref(false) // 测验模式罗马音默认隐藏
 
 // 统计数据
 const stats = ref({
@@ -79,6 +81,7 @@ const loadDailyWords = async () => {
   currentIndex.value = 0
   showMeaning.value = false
   showExample.value = false
+  showRomaji.value = false
 
   try {
     let data = await getDailyWords(20)
@@ -114,6 +117,7 @@ const loadReviewWords = async () => {
   currentIndex.value = 0
   showMeaning.value = false
   showExample.value = false
+  showRomaji.value = false
 
   try {
     const data = await getReviewWords()
@@ -174,6 +178,7 @@ const startQuiz = async () => {
   quizAnswer.value = ''
   quizSubmitted.value = false
   quizScore.value = { correct: 0, wrong: 0 }
+  showQuizRomaji.value = false
 
   try {
     // 获取今日学习的单词
@@ -238,6 +243,7 @@ const nextQuizQuestion = () => {
     quizAnswer.value = ''
     quizSubmitted.value = false
     quizCorrect.value = false
+    showQuizRomaji.value = false // 重置罗马音显示
     // 自动播放发音
     nextTick(() => {
       if (currentQuizWord.value && isSupported.value) {
@@ -274,6 +280,7 @@ const nextWord = () => {
     currentIndex.value++
     showMeaning.value = false
     showExample.value = false
+    showRomaji.value = false
   } else {
     // 已完成所有单词
     isCompleted.value = true
@@ -287,6 +294,7 @@ const prevWord = () => {
     currentIndex.value--
     showMeaning.value = false
     showExample.value = false
+    showRomaji.value = false
   }
 }
 
@@ -554,10 +562,17 @@ onMounted(async () => {
                 {{ currentQuizWord.katakana }}
               </p>
 
-              <!-- 罗马音 -->
-              <p v-if="currentQuizWord.romaji" class="text-lg text-gray-400 mb-4">
-                {{ currentQuizWord.romaji }}
-              </p>
+              <!-- 罗马音（点击显示） -->
+              <button
+                v-if="currentQuizWord.romaji"
+                class="text-lg mb-4 px-3 py-1 rounded-lg transition-all"
+                :class="showQuizRomaji
+                  ? 'text-gray-400'
+                  : 'text-gray-300 dark:text-gray-600 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'"
+                @click="showQuizRomaji = !showQuizRomaji"
+              >
+                {{ showQuizRomaji ? currentQuizWord.romaji : '点击显示罗马音' }}
+              </button>
 
               <!-- 发音按钮 -->
               <button
@@ -734,10 +749,17 @@ onMounted(async () => {
               </span>
             </p>
 
-            <!-- 罗马音 -->
-            <p v-if="currentWord.romaji" class="text-sm text-gray-400 mb-4">
-              {{ currentWord.romaji }}
-            </p>
+            <!-- 罗马音（点击显示） -->
+            <button
+              v-if="currentWord.romaji"
+              class="text-sm mb-4 px-3 py-1 rounded-lg transition-all"
+              :class="showRomaji
+                ? 'text-gray-400'
+                : 'text-gray-300 dark:text-gray-600 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'"
+              @click="showRomaji = !showRomaji"
+            >
+              {{ showRomaji ? currentWord.romaji : '点击显示罗马音' }}
+            </button>
 
             <!-- 发音按钮 -->
             <button
