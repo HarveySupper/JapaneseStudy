@@ -6,8 +6,8 @@ const { getDailyWords, getReviewWords, markMastery, getStats } = useVocabulary()
 const { fetchByLevel, fetchAndSaveWords, isLoading: isJishoLoading } = useJisho()
 const { isLoggedIn } = useAuth()
 
-// 当前模式：learn = 今日学习，review = 复习
-type Mode = 'learn' | 'review'
+// 当前模式：learn = 今日学习，review = 复习，quiz = 测验
+type Mode = 'learn' | 'review' | 'quiz'
 const currentMode = ref<Mode>('learn')
 
 // 单词列表
@@ -19,6 +19,15 @@ const isLoading = ref(true)
 const isCompleted = ref(false)
 const isSyncing = ref(false) // 是否正在同步单词
 const syncProgress = ref('') // 同步进度信息
+
+// 测验相关状态
+const quizWords = ref<any[]>([]) // 测验用的单词（打乱顺序）
+const quizIndex = ref(0)
+const quizAnswer = ref('') // 用户输入的答案
+const quizSubmitted = ref(false) // 是否已提交当前题目
+const quizCorrect = ref(false) // 当前题目是否正确
+const quizScore = ref({ correct: 0, wrong: 0 }) // 测验得分
+const quizFinished = ref(false) // 测验是否结束
 
 // 统计数据
 const stats = ref({
@@ -135,8 +144,120 @@ const switchMode = async (mode: Mode) => {
   currentMode.value = mode
   if (mode === 'learn') {
     await loadDailyWords()
-  } else {
+  } else if (mode === 'review') {
     await loadReviewWords()
+  } else if (mode === 'quiz') {
+    await startQuiz()
+  }
+}
+
+// ========== 测验相关函数 ==========
+
+// 当前测验单词
+const currentQuizWord = computed(() => quizWords.value[quizIndex.value])
+
+// 打乱数组顺序
+const shuffleArray = <T>(array: T[]): T[] => {
+  const shuffled = [...array]
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[shuffled[i], shuffled[j]] = [shuffled[j]!, shuffled[i]!]
+  }
+  return shuffled
+}
+
+// 开始测验
+const startQuiz = async () => {
+  isLoading.value = true
+  quizFinished.value = false
+  quizIndex.value = 0
+  quizAnswer.value = ''
+  quizSubmitted.value = false
+  quizScore.value = { correct: 0, wrong: 0 }
+
+  try {
+    // 获取今日学习的单词
+    const data = await getDailyWords(20)
+    if (data.length === 0) {
+      quizWords.value = []
+    } else {
+      // 打乱顺序
+      quizWords.value = shuffleArray(data)
+    }
+  } catch (e) {
+    console.error('Failed to load quiz words:', e)
+    quizWords.value = []
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// 检查答案是否正确（模糊匹配）
+const checkAnswer = (userAnswer: string, correctMeaning: string): boolean => {
+  const normalizedUser = userAnswer.trim().toLowerCase()
+  const normalizedCorrect = correctMeaning.trim().toLowerCase()
+
+  // 完全匹配
+  if (normalizedUser === normalizedCorrect) return true
+
+  // 用户答案包含在正确答案中，或正确答案包含用户答案
+  if (normalizedCorrect.includes(normalizedUser) && normalizedUser.length >= 1) return true
+  if (normalizedUser.includes(normalizedCorrect)) return true
+
+  // 按分隔符拆分正确答案，检查是否匹配任意一个
+  const separators = /[;；,，、\/]/
+  const correctParts = normalizedCorrect.split(separators).map(s => s.trim())
+  for (const part of correctParts) {
+    if (part && (part === normalizedUser || part.includes(normalizedUser) || normalizedUser.includes(part))) {
+      return true
+    }
+  }
+
+  return false
+}
+
+// 提交测验答案
+const submitQuizAnswer = () => {
+  if (!currentQuizWord.value || quizSubmitted.value) return
+
+  const isCorrect = checkAnswer(quizAnswer.value, currentQuizWord.value.meaning)
+  quizCorrect.value = isCorrect
+  quizSubmitted.value = true
+
+  if (isCorrect) {
+    quizScore.value.correct++
+  } else {
+    quizScore.value.wrong++
+  }
+}
+
+// 下一道测验题
+const nextQuizQuestion = () => {
+  if (quizIndex.value < quizWords.value.length - 1) {
+    quizIndex.value++
+    quizAnswer.value = ''
+    quizSubmitted.value = false
+    quizCorrect.value = false
+    // 自动播放发音
+    nextTick(() => {
+      if (currentQuizWord.value && isSupported.value) {
+        speak(currentQuizWord.value.hiragana || currentQuizWord.value.kanji)
+      }
+    })
+  } else {
+    quizFinished.value = true
+  }
+}
+
+// 重新开始测验
+const restartQuiz = () => {
+  startQuiz()
+}
+
+// 播放当前测验单词发音
+const speakQuizWord = () => {
+  if (currentQuizWord.value) {
+    speak(currentQuizWord.value.hiragana || currentQuizWord.value.kanji)
   }
 }
 
@@ -246,7 +367,7 @@ onMounted(async () => {
           @click="switchMode('learn')"
         >
           <UIcon name="i-heroicons-book-open" class="w-4 h-4" />
-          今日学习
+          学习
         </button>
         <button
           class="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 relative"
@@ -264,6 +385,16 @@ onMounted(async () => {
           >
             {{ stats.needReview > 99 ? '99+' : stats.needReview }}
           </span>
+        </button>
+        <button
+          class="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2"
+          :class="currentMode === 'quiz'
+            ? 'bg-white text-purple-600'
+            : 'bg-white/20 text-white hover:bg-white/30'"
+          @click="switchMode('quiz')"
+        >
+          <UIcon name="i-heroicons-pencil-square" class="w-4 h-4" />
+          测验
         </button>
       </div>
     </div>
@@ -294,6 +425,214 @@ onMounted(async () => {
         <UIcon name="i-heroicons-arrow-path" class="w-8 h-8 text-purple-500 animate-spin" />
         <p class="mt-4 text-gray-500 dark:text-gray-400">加载中...</p>
       </div>
+
+      <!-- ========== 测验模式 ========== -->
+      <template v-else-if="currentMode === 'quiz'">
+        <!-- 测验完成 -->
+        <div v-if="quizFinished" class="max-w-md mx-auto">
+          <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg text-center">
+            <div class="w-20 h-20 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full mx-auto mb-4 flex items-center justify-center">
+              <UIcon name="i-heroicons-trophy" class="w-10 h-10 text-white" />
+            </div>
+
+            <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">
+              测验完成！
+            </h2>
+
+            <!-- 得分展示 -->
+            <div class="flex justify-center gap-8 my-6">
+              <div class="text-center">
+                <p class="text-4xl font-bold text-emerald-500">{{ quizScore.correct }}</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">正确</p>
+              </div>
+              <div class="text-center">
+                <p class="text-4xl font-bold text-red-500">{{ quizScore.wrong }}</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">错误</p>
+              </div>
+            </div>
+
+            <!-- 正确率 -->
+            <div class="mb-6">
+              <div class="h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  class="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500"
+                  :style="{ width: `${quizWords.length > 0 ? (quizScore.correct / quizWords.length) * 100 : 0}%` }"
+                />
+              </div>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                正确率：{{ quizWords.length > 0 ? Math.round((quizScore.correct / quizWords.length) * 100) : 0 }}%
+              </p>
+            </div>
+
+            <div class="space-y-3">
+              <button
+                class="w-full py-3 bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all"
+                @click="restartQuiz"
+              >
+                再测一次
+              </button>
+              <button
+                class="w-full py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 transition-all"
+                @click="switchMode('learn')"
+              >
+                返回学习
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 无单词可测验 -->
+        <div v-else-if="quizWords.length === 0" class="max-w-md mx-auto">
+          <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg text-center">
+            <div class="w-20 h-20 bg-gray-100 dark:bg-gray-700 rounded-full mx-auto mb-4 flex items-center justify-center">
+              <UIcon name="i-heroicons-pencil-square" class="w-10 h-10 text-gray-400" />
+            </div>
+            <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">
+              暂无可测验的单词
+            </h2>
+            <p class="text-gray-500 dark:text-gray-400 mb-6">
+              请先学习一些单词再来测验
+            </p>
+            <button
+              class="w-full py-3 bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all"
+              @click="switchMode('learn')"
+            >
+              去学习
+            </button>
+          </div>
+        </div>
+
+        <!-- 测验进行中 -->
+        <div v-else-if="currentQuizWord" class="max-w-md mx-auto">
+          <!-- 进度 -->
+          <div class="flex items-center justify-between mb-4">
+            <span class="text-sm text-gray-500 dark:text-gray-400">单词测验</span>
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ quizIndex + 1 }} / {{ quizWords.length }}
+            </span>
+          </div>
+
+          <!-- 进度条 -->
+          <div class="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-6">
+            <div
+              class="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-all duration-300"
+              :style="{ width: `${((quizIndex + 1) / quizWords.length) * 100}%` }"
+            />
+          </div>
+
+          <!-- 得分显示 -->
+          <div class="flex justify-center gap-6 mb-4">
+            <span class="text-sm">
+              <span class="text-emerald-500 font-bold">{{ quizScore.correct }}</span>
+              <span class="text-gray-400"> 正确</span>
+            </span>
+            <span class="text-sm">
+              <span class="text-red-500 font-bold">{{ quizScore.wrong }}</span>
+              <span class="text-gray-400"> 错误</span>
+            </span>
+          </div>
+
+          <!-- 测验卡片 -->
+          <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg overflow-hidden mb-6">
+            <div class="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 flex items-center justify-between">
+              <span class="text-xs font-medium text-amber-600 dark:text-amber-400">
+                听音写义
+              </span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">
+                {{ currentQuizWord.level || 'N5' }}
+              </span>
+            </div>
+
+            <div class="p-6 text-center">
+              <!-- 日文单词（汉字/假名） -->
+              <h2 class="text-5xl font-bold text-gray-900 dark:text-white mb-3">
+                {{ currentQuizWord.kanji }}
+              </h2>
+
+              <!-- 假名 -->
+              <p class="text-2xl text-purple-500 mb-4">
+                {{ currentQuizWord.hiragana }}
+                <span v-if="currentQuizWord.katakana" class="text-gray-400 text-lg ml-2">
+                  ({{ currentQuizWord.katakana }})
+                </span>
+              </p>
+
+              <!-- 发音按钮 -->
+              <button
+                v-if="isSupported"
+                class="inline-flex items-center gap-2 px-6 py-3 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-full hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-all mb-6"
+                @click="speakQuizWord"
+              >
+                <UIcon name="i-heroicons-speaker-wave" class="w-6 h-6" />
+                <span class="font-medium">点击朗读</span>
+              </button>
+
+              <!-- 输入框 -->
+              <div class="mt-4">
+                <input
+                  v-model="quizAnswer"
+                  type="text"
+                  placeholder="请输入中文释义"
+                  class="w-full px-4 py-3 text-center text-lg border-2 rounded-xl transition-all focus:outline-none"
+                  :class="quizSubmitted
+                    ? quizCorrect
+                      ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+                      : 'border-red-500 bg-red-50 dark:bg-red-900/20'
+                    : 'border-gray-200 dark:border-gray-600 focus:border-purple-500 dark:bg-gray-700'"
+                  :disabled="quizSubmitted"
+                  @keyup.enter="quizSubmitted ? nextQuizQuestion() : submitQuizAnswer()"
+                />
+              </div>
+
+              <!-- 答案反馈 -->
+              <div v-if="quizSubmitted" class="mt-4">
+                <div
+                  class="p-4 rounded-xl"
+                  :class="quizCorrect
+                    ? 'bg-emerald-50 dark:bg-emerald-900/20'
+                    : 'bg-red-50 dark:bg-red-900/20'"
+                >
+                  <div class="flex items-center justify-center gap-2 mb-2">
+                    <UIcon
+                      :name="quizCorrect ? 'i-heroicons-check-circle' : 'i-heroicons-x-circle'"
+                      class="w-6 h-6"
+                      :class="quizCorrect ? 'text-emerald-500' : 'text-red-500'"
+                    />
+                    <span
+                      class="font-bold"
+                      :class="quizCorrect ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'"
+                    >
+                      {{ quizCorrect ? '回答正确！' : '回答错误' }}
+                    </span>
+                  </div>
+                  <p class="text-gray-700 dark:text-gray-300">
+                    正确答案：<span class="font-medium">{{ currentQuizWord.meaning }}</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 操作按钮 -->
+          <div class="flex gap-4">
+            <button
+              v-if="!quizSubmitted"
+              class="flex-1 py-3 bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white font-medium rounded-xl shadow-lg hover:shadow-xl transition-all disabled:opacity-50"
+              :disabled="!quizAnswer.trim()"
+              @click="submitQuizAnswer"
+            >
+              提交答案
+            </button>
+            <button
+              v-else
+              class="flex-1 py-3 bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white font-medium rounded-xl shadow-lg hover:shadow-xl transition-all"
+              @click="nextQuizQuestion"
+            >
+              {{ quizIndex < quizWords.length - 1 ? '下一题' : '查看结果' }}
+            </button>
+          </div>
+        </div>
+      </template>
 
       <!-- 完成状态 -->
       <div v-else-if="isCompleted" class="max-w-md mx-auto">
